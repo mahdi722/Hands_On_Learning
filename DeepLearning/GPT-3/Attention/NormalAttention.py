@@ -13,7 +13,7 @@ class MultiHeadAttention(nn.Module):
         self.query_weights_multiplication = nn.Linear(d_model, d_model)  # In paper it is d_model, d_k but for efficient integration I chose d_model, d_model then split the heads
         self.key_weights_multiplication = nn.Linear(d_model, d_model)
         self.value_weights_multiplication = nn.Linear(d_model, d_model)
-
+        self.output_weights = nn.Linear(d_model, d_model)
     def _separate_head(self, vec):
 
         batch_size, sequence_length, d_model = vec.size()
@@ -38,6 +38,7 @@ class MultiHeadAttention(nn.Module):
     def forward(self, query, key, value, mask = None):
         # query = (batch_size, seqence_length, d_model) 
         # After multiplication for adding learnable parameters (batch_size, sequence_length, d_model) * (d_model, d_model) = (batch_size, sequence_length, d_model)
+        batch_size, sequence_length, d_model = query.size()
         query = self.query_weights_multiplication(query)
         key = self.key_weights_multiplication(key)
         value = self.value_weights_multiplication(value)
@@ -46,8 +47,15 @@ class MultiHeadAttention(nn.Module):
         key = self._separate_head(key)
         value = self._separate_head(value)
 
+        attention = self._dot_product_attention(query=query, key=key, value=value, mask=mask)
+        # The attention is #(batch_size, h, sequence_length, d_model)
         # output must be (batch_size, sequence_length, d_model)
-
-
-
+        attention = attention.transpose(-2, -1)
+        # we need to use view to make it different shape but since transpose only changes strides in memory and doesn't return laid out version of tensor we need to make it contiguous then view it other wise we face an error of compatibility
+        batch_size, sequence_length, d_model = attention.size()
+        attention = attention.contiguous()
+        attention = attention.view(batch_size, sequence_length, d_model)
+        
+        output = self.output_weights(attention)
+        return output
 
