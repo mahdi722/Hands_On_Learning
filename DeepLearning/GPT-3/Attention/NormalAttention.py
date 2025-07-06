@@ -6,11 +6,11 @@ import torch.nn as nn
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model: int, h: int):   # h = number of heads
-        super.__init__(MultiHeadAttention, self)
+        super(MultiHeadAttention, self).__init__()
         self.d_model = d_model
         self.h = h
 
-        self.d_k, self.d_v = d_model / h
+        self.d_k = d_model // h
 
         self.query_weights_multiplication = nn.Linear(d_model, d_model)  # In paper it is d_model, d_k but for efficient integration I chose d_model, d_model then split the heads
         self.key_weights_multiplication = nn.Linear(d_model, d_model)
@@ -18,9 +18,9 @@ class MultiHeadAttention(nn.Module):
         self.output_weights = nn.Linear(d_model, d_model)
     def _separate_head(self, tensor):
 
-        batch_size, sequence_length, d_model = tensor.size()
-        # vec = (batch_size, sequence_length, h, d_k)
-        tensor = tensor.view(batch_size, sequence_length, self.h, d_model)
+        batch_size, sequence_length, _ = tensor.size()
+        # vec = (batch_size, sequence_length, h, d_model)
+        tensor = tensor.view(batch_size, sequence_length, self.h, self.d_k)
         # vec = (batch_size, h, sequence_length , d_k) by transposing index 1 and 2
         return tensor.transpose(1, 2)
 
@@ -28,7 +28,8 @@ class MultiHeadAttention(nn.Module):
         # (batch_size, h, sequence_length , d_k)
         QK = torch.matmul(query, key.transpose(-2, -1)) / (self.d_k ** 0.5) #(batch_size, h, sequence_length, sequence_length)
         # masking out (setting to -inf) all values in the input of the softmax which correspond to illegal connetction
-        if mask:
+
+        if mask is not None:
             QK = QK.masked_fill(mask ==0, -1e9)
 
         softmax_QK = torch.softmax(QK, dim=-1)
@@ -38,12 +39,13 @@ class MultiHeadAttention(nn.Module):
         return attention
     
     def _combine_heads(self, tensor):
-        batch_size, sequence_length, d_model = tensor.size()
+        batch_size, h, sequence_length, d_k = tensor.size()
         tensor = tensor.transpose(-2, -1)
         # we need to use view to make it different shape but since transpose only changes strides in memory and doesn't return laid out version of tensor we need to make it contiguous then view it other wise we face an error of compatibility
         tensor = tensor.contiguous()
-        tensor = tensor.view(batch_size, sequence_length, d_model)
-        
+        tensor = tensor.view(batch_size, sequence_length, self.d_model)
+        return tensor
+    
     def forward(self, query, key, value, mask = None):
         # query = (batch_size, seqence_length, d_model) 
         # After multiplication for adding learnable parameters (batch_size, sequence_length, d_model) * (d_model, d_model) = (batch_size, sequence_length, d_model)
