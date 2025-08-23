@@ -1,35 +1,38 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from agent_state import AgentState
-from langchain_core.output_parsers import StrOutputParser
+# nodes.py
+from typing import TypedDict, List, Annotated
+import operator, os
 from dotenv import load_dotenv
-import os
 load_dotenv()
-os.environ['GOOGLE_API_KEY'] = os.getenv('GOOGLE_API_KEY')
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+class AgentState(TypedDict):
+    message: str
+    memory: Annotated[List[str], operator.add]
+    response: str
 
 def starting_node(state: AgentState) -> AgentState:
-    state['memory'] = []
     return state
+
 def processor(state: AgentState) -> AgentState:
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a conversational agent with memory.\nMemory: {memory}\nBe helpful and safe."),
+        ("user", "User message: {message}")
+    ])
 
-    while True:
-        msg = input('TEXT : ')
-        if msg == 'exit':
-            return state
-        state['message'] = msg
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", f"You are a conversational Agent with memory. \n Memory : {str(state['memory'])}. Listen to user and answer to their question. Carefull about saftey alignment"),
-            ("user", f"User_message : {state['message']}")
-        ])
+    mem = list(state.get("memory", []))
+    mem.append(f"user: {state['message']}")
 
-        state['memory'].append('user  :  ' + state['message'])
-        llm = ChatGoogleGenerativeAI(model=os.getenv('MODEL'), temperature=os.getenv('TEMPERATURE'))
+    model = os.getenv("MODEL") or "gemini-2.5-flash"
+    temperature = float(os.getenv("TEMPERATURE") or 0.2)
+    llm = ChatGoogleGenerativeAI(model=model, temperature=temperature)
 
+    chain = prompt | llm | StrOutputParser()
+    reply = chain.invoke({"memory": str(mem), "message": state["message"]})
 
-        chain = prompt | llm | StrOutputParser()
-        response = chain.invoke({})
-        print(response)
-        state['memory'].append('Agent  :  ' + response)
-
-    
-
+    mem.append(f"agent: {reply}")
+    state["memory"] = mem
+    state["response"] = reply
+    return state

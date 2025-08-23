@@ -1,21 +1,18 @@
+# graph.py
 from langgraph.graph import StateGraph, START, END
-from nodes import starting_node, processor
-from agent_state import AgentState
+from nodes import starting_node, processor, AgentState
 
-class work_flow():
+class WorkFlow:
     def __init__(self):
         self.graph = StateGraph(AgentState)
 
-    def _define_nodes(self):
-        self.graph.add_node(node='Starting_Node', action=starting_node)
-        self.graph.add_node(node='Chat_Node', action=processor)
-
-    def _define_edges(self):
-        self.graph.add_edge(start_key=START, end_key='Starting_Node')
-        self.graph.add_edge(start_key='Starting_Node', end_key='Chat_Node')
-        self.graph.add_edge(start_key='Chat_Node', end_key=END)
+    def _define(self):
+        self.graph.add_node("Starting_Node", starting_node)
+        self.graph.add_node("Chat_Node", processor)
+        self.graph.add_edge(START, "Starting_Node")
+        self.graph.add_edge("Starting_Node", "Chat_Node")
+        self.graph.add_edge("Chat_Node", END)
 
     def get_graph(self):
-        self._define_nodes()
-        self._define_edges()
+        self._define()
         return self.graph.compile()
