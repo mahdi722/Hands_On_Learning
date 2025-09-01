@@ -6,7 +6,6 @@ import json
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-
 class JsonFormatter(logging.Formatter):
     def format(self, record):
         log_record = {
