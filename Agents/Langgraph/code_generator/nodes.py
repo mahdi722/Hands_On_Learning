@@ -1,18 +1,17 @@
 from agent_state import AgentState
+from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain.tools import Tool
 from logger import get_logger
-from dotenv import load_dotenv
-load_dotenv()
 from config import settings
 
-import subprocess, re, ast, time
 
 logger = get_logger("nodes", json_logs=settings.json_logs)
 PERSISTENT_NAMESPACE = {"__builtins__": __builtins__}
-
 
 def planner(state: AgentState) -> AgentState:
     """Generate a step-by-step plan for solving the coding task."""
@@ -46,69 +45,100 @@ def planner(state: AgentState) -> AgentState:
         return state
 
 
-def safe_execute(code_string: str) -> str:
-    """Run code in a sandboxed subprocess with timeout."""
+def code_executor_tool(code_string: str) -> dict:
+    """Execute Python code safely and return stdout/stderr + execution time."""
+    import subprocess, sys, time
+
+    start_time = time.perf_counter()
     try:
         proc = subprocess.run(
-            ["python3", "-c", code_string],
+            [sys.executable, "-c", code_string],
             capture_output=True,
             text=True,
             timeout=settings.max_exec_time,
         )
-        if proc.returncode != 0:
-            return f"RuntimeError: {proc.stderr.strip()}"
-        return proc.stdout.strip() if proc.stdout.strip() else "No output"
-    except subprocess.TimeoutExpired:
-        return f"TimeoutError: exceeded {settings.max_exec_time}s"
+        exec_time = time.perf_counter() - start_time
 
+        if proc.returncode != 0:
+            return {
+                "status": "error",
+                "stdout": "",
+                "stderr": proc.stderr.strip(),
+                "execution_time": f"{exec_time:.4f}s"
+            }
+
+        return {
+            "status": "success",
+            "stdout": proc.stdout.strip() or "Execution succeeded",
+            "stderr": "",
+            "execution_time": f"{exec_time:.4f}s"
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "timeout",
+            "stdout": "",
+            "stderr": f"TimeoutError: exceeded {settings.max_exec_time}s",
+            "execution_time": f"{settings.max_exec_time:.4f}s"
+        }
+
+    except Exception as e:
+        exec_time = time.perf_counter() - start_time
+        return {
+            "status": "error",
+            "stdout": "",
+            "stderr": str(e),
+            "execution_time": f"{exec_time:.4f}s"
+        }
 
 
 def code_generator(state: AgentState) -> AgentState:
-    """Generate and safely execute Python code from the plan."""
+    """Use ChatGPT with tool calling to generate + test code."""
     try:
         prompt = ChatPromptTemplate([
             ("system",
-             "You are a Python code generator. "
-             "Return ONLY valid Python code. "
-             "Wrap it inside triple backticks with 'python'. "
-             "Do NOT add explanations, comments outside code, "
-             "or tags like [/PYTHON]."),
+             "You are a coding agent. "
+             "The user will give you a plan that includes algorithm steps and test cases. "
+             "Generate Python code. "
+             "Use the CodeExecutor tool to run the code against the test cases. "
+             "If tests fail, fix the code and try again. "
+             "Return ONLY the final passing Python code."),
             ("user", "{plan}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
         ])
 
-        llm = ChatOllama(
-            model=settings.model_name,
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",   
             temperature=settings.temperature,
-            streaming=True,
         )
 
-        chain = prompt | llm | StrOutputParser()
-        raw_output = chain.invoke({"plan": state["plan"]})
+        tools = [
+            Tool(
+                name="CodeExecutor",
+                func=code_executor_tool,
+                description="Executes Python code and returns stdout/stderr",
+            )
+        ]
 
-        match = re.search(r"```(?:python)?\s*([\s\S]*?)```", raw_output)
-        code_string = match.group(1).strip() if match else raw_output.strip()
+        agent = create_openai_functions_agent(llm=llm, tools=tools, prompt=prompt)
 
-        code_string = re.sub(r"\[/?PYTHON\]", "", code_string)
+        executor = AgentExecutor.from_agent_and_tools(
+            agent=agent,
+            tools=tools,
+            verbose=True,
+            return_intermediate_steps=True,
+            max_iterations=5,
+            early_stopping_method="generate",
+            handle_parsing_errors=True,  
+        )
 
-        logger.info(f"Generated code:\n{code_string}")
+        logger.info("Starting code generation with ChatGPT agent...")
+        response = executor.invoke({"plan": state["plan"]})
 
-        try:
-            ast.parse(code_string)
-        except SyntaxError as e:
-            state["error"] = f"Invalid Python generated: {e}"
-            logger.error(state["error"])
-            return state
-
-        start_time = time.perf_counter()
-        result = safe_execute(code_string)
-        exec_time = time.perf_counter() - start_time
-
-        logger.info(f"Execution finished in {exec_time:.4f} seconds")
-
-        state["code"] = code_string
-        state["result"] = result
-        state["execution_time"] = f"{exec_time:.4f}s"
-        state["error"] = "" if "Error" not in result else result
+        state["code"] = response.get("output", "")
+        state["result"] = response.get("intermediate_steps", "")
+        state["execution_time"] = None
+        state["error"] = ""
         return state
 
     except Exception as e:
@@ -116,4 +146,3 @@ def code_generator(state: AgentState) -> AgentState:
         logger.exception(error_msg)
         state["error"] = error_msg
         return state
-
