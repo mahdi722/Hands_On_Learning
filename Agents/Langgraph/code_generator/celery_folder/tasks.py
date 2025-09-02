@@ -1,6 +1,6 @@
 from prometheus_client import Counter, Histogram
-from celery_app import celery_app
-from nodes import code_executor_tool
+from celery_folder.celery_app import celery_app
+from agent.nodes import code_executor_tool
 import time
 
 task_success = Counter("celery_task_success_total", "Successful tasks", ["task"])

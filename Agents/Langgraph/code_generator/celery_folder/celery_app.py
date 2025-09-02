@@ -20,5 +20,5 @@ celery_app.conf.update(
     worker_concurrency=4,  
     task_track_started=True,
     broker_heartbeat=10,
-    include=["tasks"],
+    include=["celery_folder.tasks"],
 )

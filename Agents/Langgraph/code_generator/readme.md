@@ -1,4 +1,4 @@
-# 🧠 Agentic Code Generator
+#  Agentic Code Generator
 
 An **LLM-powered agent workflow** that:
 - Uses a **Planner** (LangChain/Ollama) to generate step-by-step algorithms + test cases.  
@@ -8,7 +8,7 @@ An **LLM-powered agent workflow** that:
 
 ---
 
-## 📦 Requirements
+##  Requirements
 
 - Python **3.11**
 - Redis (for Celery broker)
@@ -16,7 +16,7 @@ An **LLM-powered agent workflow** that:
 
 ---
 
-## ⚙️ Installation
+##  Installation
 
 ### 1. Clone the repository
 ```bash
@@ -33,7 +33,7 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-🚀 Running Locally
+ Running Locally
 Ubuntu / Debian
 sudo apt update
 sudo apt install redis-server -y
@@ -44,10 +44,10 @@ sudo systemctl start redis-server
 
 Check status:
 redis-cli ping
-➡️ Should return: PONG
+ Should return: PONG
 redis-server
 celery -A celery_app.celery_app worker --loglevel=INFO
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 sample : 
 curl -X POST http://127.0.0.1:8000/generate \

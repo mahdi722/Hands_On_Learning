@@ -1,17 +1,16 @@
 from fastapi import FastAPI, HTTPException
-from graph_creation import Graph
-from agent_state import AgentState
-from logger import get_logger
+from agent.graph_creation import Graph
+from agent.agent_state import AgentState
+from logger.logger import get_logger
 from config import settings
-from models import QueryRequest
-from tasks import execute_code_task
+from celery_folder.tasks import execute_code_task
 from celery.result import AsyncResult
 from prometheus_fastapi_instrumentator import Instrumentator
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
-
+from pydantic import BaseModel
 trace.set_tracer_provider(TracerProvider())
 logger = get_logger("main", json_logs=settings.json_logs)
 
@@ -22,6 +21,10 @@ app = FastAPI(title="Agent Workflow API", version="1.0.0")
 Instrumentator().instrument(app).expose(app)
 FastAPIInstrumentor.instrument_app(app)
 LoggingInstrumentor().instrument(set_logging_format=True)
+
+class QueryRequest(BaseModel):
+    query: str
+
 
 @app.get("/health")
 async def health():
@@ -56,7 +59,6 @@ async def invoke_agent(request: QueryRequest):
 
 @app.get("/result/{task_id}")
 async def get_result(task_id: str):
-    """Fetch execution result from Celery by task ID."""
     result = AsyncResult(task_id)
     if result.ready():
         return result.result

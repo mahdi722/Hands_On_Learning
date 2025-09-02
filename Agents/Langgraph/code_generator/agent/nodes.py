@@ -1,4 +1,4 @@
-from agent_state import AgentState
+from agent.agent_state import AgentState
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -6,7 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.agents import AgentExecutor, create_openai_functions_agent
 from langchain.tools import Tool
-from logger import get_logger
+from logger.logger import get_logger
 from config import settings
 from opentelemetry import trace
 import subprocess, time, uuid
@@ -15,8 +15,7 @@ tracer = trace.get_tracer(__name__)
 logger = get_logger("nodes", json_logs=settings.json_logs)
 PERSISTENT_NAMESPACE = {"__builtins__": __builtins__}
 
-def planner(state: AgentState) -> AgentState:
-    """Generate a step-by-step plan for solving the coding task."""
+def planner(state: AgentState, chain_factory=None) -> AgentState:
     with tracer.start_as_current_span("planner"):
         try:
             prompt = ChatPromptTemplate([
@@ -35,7 +34,8 @@ def planner(state: AgentState) -> AgentState:
                 callbacks=[StreamingStdOutCallbackHandler()],
             )
 
-            chain = prompt | llm | StrOutputParser()
+            chain_factory = chain_factory or (lambda: prompt | llm | StrOutputParser())
+            chain = chain_factory()
             response = chain.invoke({"user_query": state["query"]})
 
             state["plan"] = response.strip()
@@ -50,7 +50,6 @@ def planner(state: AgentState) -> AgentState:
 
 
 def code_executor_tool(code_string: str) -> dict:
-    """Execute Python code safely inside a Docker sandbox."""
     with tracer.start_as_current_span("code_generator"):
         container_name = f"code_exec_{uuid.uuid4().hex[:8]}"
         start_time = time.perf_counter()
@@ -89,7 +88,6 @@ def code_executor_tool(code_string: str) -> dict:
 
 
 def code_generator(state: AgentState) -> AgentState:
-    """Use ChatGPT with tool calling to generate + test code."""
     with tracer.start_as_current_span("code_executor"):
         try:
             prompt = ChatPromptTemplate([
